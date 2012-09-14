@@ -102,6 +102,26 @@
 				};
 
 				hrvmon.update_bpm = function() {
+					var points = [];
+					var elapsed = 0;  // Milliseconds
+					for (var i=hrvmon.data.period_history.length-1; i >= 0; i--) {
+						points.push(
+							Math.round(950-(elapsed/100))
+							+ ','
+							+ Math.round(20 + (
+								(
+									(hrvmon.data.period_history[i] - hrvmon.data.period_min)
+									/
+									(hrvmon.data.period_max - hrvmon.data.period_min)
+								)
+								* 160
+							))
+						);
+						elapsed = elapsed + hrvmon.data.period_history[i];
+					};
+					$('#bpm_line').attr('points', points.join(' '));
+					$('#bpm_max').text(Math.round(60000/hrvmon.data.period_min));
+					$('#bpm_min').text(Math.round(60000/hrvmon.data.period_max));
 				};
 
 				hrvmon.update_dashboard = function() {
@@ -193,7 +213,12 @@
 
 		<svg id="bpm_chart" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="33%" viewBox="0 0 1000 200">
 			<title>BPM Chart</title>
-			<text x="5" y="14" fill="black">Heart Rate (in BPM)</text>
+			<text x="5"     y="14" fill="black">Heart Rate (in BPM)</text>
+			<polyline id="bpm_line" points="950,180 950,180" style="fill:none; stroke:blue; stroke-width:3; stroke-linecap:round;" />
+			<line x1="0"   y1="180" x2="955" y2="180" style="stroke:rgb(0,0,0); stroke-width:1;" />
+			<line x1="950" y1="20"  x2="950" y2="185" style="stroke:rgb(0,0,0); stroke-width:1;" />
+			<text id="bpm_max" x="960" y="20" fill="black">??</text>
+			<text id="bpm_min" x="960" y="180" fill="black">??</text>
 		</svg>
 
 		<svg id="psd_chart" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="33%" viewBox="0 0 1000 200">
@@ -236,21 +261,6 @@
 				<text x="935" y="196" fill="black">0.47</text>
 			</g>
 		</svg>
-
-		<p>&nbsp;</p>
-		<p>&nbsp;</p>
-		<p>&nbsp;</p>
-
-		<svg id="test" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="25%" style="border: 1px solid black;">
-			<title>Test</title>
-			<rect x="225" y="25" rx="10" ry="10" width="100" height="25" style="fill:rgb(255,255,255); opacity:1; fill-opacity:0.75; stroke-width:1; stroke:rgb(0,0,0);" />
-			<line x1="0" y1="0" x2="62" y2="100%" stroke-dasharray="20,10,5,5,5,10" style="stroke:rgb(0,0,255); stroke-width:3; stroke-linecap:round;" />
-			<polyline points="50,100 75,75 100,75 125,100 150,50 175,40, 200,60" style="fill:none; stroke:green; stroke-width:1;" />
-			<path d="M50,100 Q75,75 100,75 Q125,100 150,50 Q175,40 200,60" style="fill:none; stroke:red; stroke-width:1;" />
-			<text x="25" y="25" fill="orange" transform="rotate(90 25,25)" style="font-family: sans-serif;">This is a test</text>
-			<polygon points="25,25 25,50 50,50 50,25" style="fill:red; stroke:black; stroke-width: 1;" />
-		</svg>
-
 
 	</body>
 </html>
