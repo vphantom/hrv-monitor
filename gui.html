@@ -1,0 +1,256 @@
+<html>
+	<head>
+		<title>HRV Monitor</title>
+		<style type="text/css">
+
+			body {
+				background-color: #f0f0f0;
+				font-family: sans-serif;
+			}
+
+			#dashboard #bpm, #bpm_chart, #psd_chart {
+				border: 2px inset;
+				background-color: white;
+				margin-bottom: 1em;
+			}
+
+			#dashboard {
+				position: relative;
+				top: 0;
+				left: 0;
+			}
+			#dashboard #bpm {
+				position: absolute;
+				top: 0;
+				right: 0;
+				padding: 0 0.2em 0 0.2em;
+			}
+			#dashboard #bpm #bpm_num {
+				font-size: 300%;
+				font-weight: bold;
+			}
+			#dashboard #status table th {
+				text-align: right;
+			}
+			#dashboard #status table th:after {
+				content: ':';
+			}
+
+			#bpm_chart {
+			}
+
+			#psd_chart {
+			}
+			#psd_chart #psd_legend {
+			}
+			#psd_chart #psd_vlf polygon {
+				fill: red;
+				stroke: black;
+			}
+			#psd_chart #psd_lf polygon {
+				fill: orange;
+				stroke: black;
+			}
+			#psd_chart #psd_hf polygon {
+				fill: green;
+				stroke: black;
+			}
+
+
+		</style>
+		<script type="text/javascript" src="http://code.jquery.com/jquery-1.8.1.min.js"> </script>
+		<script type="text/javascript"><!--
+			// This program is free software: you can redistribute it and/or modify
+			// it under the terms of the GNU General Public License as published by
+			// the Free Software Foundation, either version 3 of the License, or
+			// (at your option) any later version.
+			//
+			// This program is distributed in the hope that it will be useful,
+			// but WITHOUT ANY WARRANTY; without even the implied warranty of
+			// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+			// GNU General Public License for more details.
+			//
+			// You should have received a copy of the GNU General Public License
+			// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+			$(document).ready(function() {
+				window.hrvmon = {};
+				hrvmon.online = false;
+				hrvmon.data = {
+					state: '',
+					source: {
+						name: '',
+						connection_type: '',
+						battery_charge: 0.0
+					},
+					heart_rate: 0.0,
+					period_history: [ ],
+					period_min: 0,
+					period_max: 0,
+					latest_beat_id: 0,
+					spectrum: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+				};
+
+				hrvmon.update_psd = function() {
+					for (var i=0; i < 14; i++) {
+						var left = 5 + (70*i);
+						var right = left + 70;
+						// 20 = 100%  180 = 0%
+						var y = 20 + 160 * (1 - hrvmon.data.spectrum[i]);
+						$('#psd'+i).attr('points', left+','+y+' '+right+','+y+' '+right+',180 '+left+',180');
+					};
+				};
+
+				hrvmon.update_bpm = function() {
+				};
+
+				hrvmon.update_dashboard = function() {
+					if (hrvmon.online) {
+						$('#status_msg').text(hrvmon.data.state);
+						$('#status_source').text(hrvmon.data.source.name+' ('+hrvmon.data.source.connection_type+')');
+						if ('battery_charge' in hrvmon.data.source) {
+							$('#status_charge').text(hrvmon.data.source.battery_charge+'%');
+						} else {
+							$('#status_charge').text('N/A');
+						};
+						$('#bpm_num').text(hrvmon.data.heart_rate);
+					} else {
+						$('#status_msg').text('Offline');
+						$('#status_source').text('None');
+						$('#bpm_num').text('??');
+						$('#status_charge').text('N/A');
+					};
+				};
+
+				hrvmon.refresh = function() {
+					hrvmon.update_dashboard();
+					hrvmon.update_bpm();
+					hrvmon.update_psd();
+				};
+
+				hrvmon.load_data = function() {
+					if (hrvmon.online) {
+						jQuery.ajax({
+							type: 'GET',
+							cache: false,
+							data: 'ajax=1',
+							dataType: 'json',
+							timeout: 5000,
+							success: function(data) {
+								// Don't update data and display if we received a "try again later" response.
+								if (hrvmon.data.state != 'Try again later') {
+									hrvmon.data = data;
+									hrvmon.refresh();
+								};
+								hrvmon.load_data();  // Yes, if it worked, reiterate immediately.
+							},
+							error: function() {
+								hrvmon.online = false;
+								hrvmon.data.spectrum = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ];
+								hrvmon.refresh();
+							}
+						});
+					};
+				};
+
+				hrvmon.refresh();
+				hrvmon.data.state = 'Connecting...';
+				$('#status_msg').text(hrvmon.data.state);
+				hrvmon.online = true;
+				hrvmon.load_data();
+
+			});
+
+
+			// --></script>
+
+
+	</head>
+	<body>
+
+		<div id="dashboard">
+			<div id="bpm">
+				<span id="bpm_num">85</span>
+				<span id="bpm_suffix">BPM</span>
+			</div>
+			<div id="status">
+				<table>
+					<tr>
+						<th>Status</th>
+						<td><span id="status_msg"></span></td>
+					</tr>
+					<tr>
+						<th>Source</th>
+						<td><span id="status_source"></span></td>
+					</tr>
+					<tr>
+						<th>Battery</th>
+						<td><span id="status_charge"></span></td>
+					</tr>
+				</table>
+			</div>
+		</div>
+
+		<svg id="bpm_chart" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="33%" viewBox="0 0 1000 200">
+			<title>BPM Chart</title>
+			<text x="5" y="14" fill="black">Heart Rate (in BPM)</text>
+		</svg>
+
+		<svg id="psd_chart" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="33%" viewBox="0 0 1000 200">
+			<title>PSD Chart</title>
+			<text x="5" y="14" fill="black">Power Spectral Density (last 30 seconds, in Hz)</text>
+			<g id="psd_vlf">
+				<polygon id="psd0" points="5,20 75,20 75,180 5,180" />
+			</g>
+			<g id="psd_lf">
+				<polygon id="psd1" points="75,20 145,20 145,180 75,180" />
+				<polygon id="psd2" points="145,20 215,20 215,180 145,180" />
+				<polygon id="psd3" points="215,20 285,20 285,180 215,180" />
+			</g>
+			<g id="psd_hf">
+				<polygon id="psd4" points="285,20 355,20 355,180 285,180" />
+				<polygon id="psd5" points="355,20 425,20 425,180 355,180" />
+				<polygon id="psd6" points="425,20 495,20 495,180 425,180" />
+				<polygon id="psd7" points="495,20 565,20 565,180 495,180" />
+				<polygon id="psd8" points="565,20 635,20 635,180 565,180" />
+				<polygon id="psd9" points="635,20 705,20 705,180 635,180" />
+				<polygon id="psd10" points="705,20 775,20 775,180 705,180" />
+				<polygon id="psd11" points="775,20 845,20 845,180 775,180" />
+				<polygon id="psd12" points="845,20 915,20 915,180 845,180" />
+				<polygon id="psd13" points="915,20 985,20 985,180 915,180" />
+			</g>
+			<g id="psd_legend">
+				<text x="25"  y="196" fill="black">0.03</text>
+				<text x="95"  y="196" fill="black">0.07</text>
+				<text x="165" y="196" fill="black">0.10</text>
+				<text x="235" y="196" fill="black">0.13</text>
+				<text x="305" y="196" fill="black">0.17</text>
+				<text x="375" y="196" fill="black">0.20</text>
+				<text x="445" y="196" fill="black">0.23</text>
+				<text x="515" y="196" fill="black">0.27</text>
+				<text x="585" y="196" fill="black">0.30</text>
+				<text x="655" y="196" fill="black">0.33</text>
+				<text x="725" y="196" fill="black">0.37</text>
+				<text x="795" y="196" fill="black">0.40</text>
+				<text x="865" y="196" fill="black">0.43</text>
+				<text x="935" y="196" fill="black">0.47</text>
+			</g>
+		</svg>
+
+		<p>&nbsp;</p>
+		<p>&nbsp;</p>
+		<p>&nbsp;</p>
+
+		<svg id="test" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.2" width="100%" height="25%" style="border: 1px solid black;">
+			<title>Test</title>
+			<rect x="225" y="25" rx="10" ry="10" width="100" height="25" style="fill:rgb(255,255,255); opacity:1; fill-opacity:0.75; stroke-width:1; stroke:rgb(0,0,0);" />
+			<line x1="0" y1="0" x2="62" y2="100%" stroke-dasharray="20,10,5,5,5,10" style="stroke:rgb(0,0,255); stroke-width:3; stroke-linecap:round;" />
+			<polyline points="50,100 75,75 100,75 125,100 150,50 175,40, 200,60" style="fill:none; stroke:green; stroke-width:1;" />
+			<path d="M50,100 Q75,75 100,75 Q125,100 150,50 Q175,40 200,60" style="fill:none; stroke:red; stroke-width:1;" />
+			<text x="25" y="25" fill="orange" transform="rotate(90 25,25)" style="font-family: sans-serif;">This is a test</text>
+			<polygon points="25,25 25,50 50,50 50,25" style="fill:red; stroke:black; stroke-width: 1;" />
+		</svg>
+
+
+	</body>
+</html>
