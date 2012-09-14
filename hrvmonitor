@@ -1,0 +1,299 @@
+#!/usr/bin/perl
+
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 3 of the License, or (at your option)
+# any later version.
+#
+# This program is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+# more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# this program.  If not, see <http://www.gnu.org/licenses/>.
+
+use 5.008;
+use strict;
+use warnings;
+
+# Standard stuff
+use Carp;
+use Getopt::Long;
+use List::Util;  # Conflict with PDL for min/max so not importing.
+use Math::Round;
+
+# PDL
+use PDL;
+use PDL::FFT qw/:Func/;
+
+# Our private stuff
+use ZephyrHxM;
+
+# For CLI mode
+use Term::ANSIColor qw(:constants);
+
+# For GUI mode
+use HTTP::Daemon;
+use HTTP::Response;
+use HTTP::Status;
+use JSON;
+
+binmode STDOUT, ":utf8";
+
+use constant SPECTRUM_SCALE_LOOKBACK => 10;  # Use highest max of the last N to scale PSD
+use constant INTERVAL_HISTORY        => 60;  # Beats
+use constant INTERPOLATION_RATE      => 40;  # Hz, to minimize artifacts
+use constant RR_HISTORY_DURATION     => 30;  # Seconds, to get spectrum in 0.033 Hz resolution
+
+my $DO_CLI    = 0;
+my $DO_GUI    = 0;
+my $HTTP_HOST = 'localhost';
+my $HTTP_PORT = 6060;
+my $getopt_success = GetOptions(
+	'cli'    => \$DO_CLI,
+	'gui'    => \$DO_GUI,
+	'both'   => sub { $DO_CLI=1; $DO_GUI=1; },
+	'port=i' => \$HTTP_PORT
+);
+die "Options:
+	--cli          Enable text output here.
+	--gui          Enable HTTP daemon for GUI.
+	--both         Shortcut to enable both text and HTTP.
+	--host=host    Set GUI HTTP host.  (Default: $HTTP_HOST) 
+	--port=port    Set GUI HTTP port.  (Default: $HTTP_PORT)
+" unless ($getopt_success && ($DO_CLI || $DO_GUI));
+
+print "\nMonitoring Heart Rate Variability.  (Hit ^C to exit.)\n\n" if $DO_CLI;
+
+my $device = new ZephyrHxM $DO_CLI;
+
+my $running = 1;
+$SIG{'INT'} = sub { $running = 0; };
+$SIG{'TERM'} = sub { $running = 0; };
+
+my $httpd;
+if ($DO_GUI) {
+	$httpd = HTTP::Daemon->new(LocalAddr => $HTTP_HOST, LocalPort => $HTTP_PORT, ReuseAddr => 1)
+		or die "ERROR: Cannot create HTTP daemon: $@\n";
+	print "Started GUI at ". $httpd->url ."\n" if $DO_CLI;
+}
+
+my @last_intervals;
+my $waveform = [];
+my @spectrum_maxes;
+my $beat_counter = 0;
+my $client;
+my $client_request;
+while ($running) {
+
+	# Get next HTTP request(s)  (BLOCKING)
+	if ($DO_GUI) {
+		# Process all file requests, leave non-file for JSON response later.
+		# Also pick up where we left off from last main iteration, supporting KeepAlive.
+		#
+		# Since we are blocking, we use the non-file request to trigger a
+		# fetch_latest() and a display (if CLI is enabled).  This has the
+		# drawback of not really allowing multiple browsers viewing the same
+		# user's data at once.
+		my $looping = 1;
+		while ($looping && ($client || ($client = $httpd->accept()))) {
+			while (($client_request = $client->get_request())  &&  ($client_request->uri =~ /^\/$|^\/favicon.ico$/)) {
+				$client->send_file_response('gui.html')    if $client_request->uri eq '/';
+				$client->send_file_response('favicon.ico') if $client_request->uri eq '/favicon.ico';
+			}
+			if ($client_request) {
+				$looping = 0;  # Let's break out and process this JSON request.
+			} else {
+				$client->close();
+				undef($client);
+			}
+		}
+	}
+
+	# Get next heart rate data packet  (BLOCKING)
+	my $packet = $device->fetch_latest();
+
+	my $json_reply = {
+		state => 'Try again later',
+		source => {
+			name            => '',
+			connection_type => '',
+			battery_charge  => 0,
+		},
+		heart_rate => 0,
+		period_history => [ ],
+		period_max => 0,
+		period_min => 0,
+		latest_beat_id => 0,
+		spectrum => [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ],
+	};
+
+
+	if ($packet->{error}) {
+		print "ERROR: ". $packet->{error} ."\n"  if $DO_CLI;
+	} elsif (scalar(@{ $packet->{new_beats} }) > 0) {
+
+		## HOUSKEEPING
+
+		# Update waveform
+		append_periods($waveform, INTERPOLATION_RATE, RR_HISTORY_DURATION, @{ $packet->{new_beats} });
+
+		# Keep INTERVAL_HISTORY intervals only
+		foreach (@{ $packet->{new_beats} }) {
+			push @last_intervals, $_;
+			$beat_counter++;
+		}
+		if (scalar(@last_intervals) > INTERVAL_HISTORY) {
+			splice @last_intervals, 0, scalar(@last_intervals) - INTERVAL_HISTORY;
+		}
+
+		# Power Spectral Density
+		my @spectrum;
+		my $spectrum_max;
+		if (scalar(@{ $waveform }) >= RR_HISTORY_DURATION * INTERPOLATION_RATE) {
+			my $fft = pdl($waveform);
+			realfft($fft);
+			# We ignore the initial, "0 Hz" result
+			for (my $i = 1, my $freq = 1/RR_HISTORY_DURATION; $freq <= 0.5; $freq = $freq + (1/RR_HISTORY_DURATION), $i++) {
+				# Power Spectral Density is in fact the square of the FFT (magnitude).
+				my $power = abs($fft->at($i))**2;
+				#my $power = abs($fft->at($i));  # Incorrect, but improves visualization?
+				push @spectrum, [ $freq, $power ];
+				if (defined $spectrum_max) {
+					$spectrum_max = List::Util::max($spectrum_max, $power);
+				} else {
+					$spectrum_max = $power;
+				}  
+			}
+			push @spectrum_maxes, $spectrum_max;
+			if (scalar(@spectrum_maxes) >= SPECTRUM_SCALE_LOOKBACK) { shift @spectrum_maxes; }
+		}
+
+
+		## DISPLAY
+
+		if ($DO_CLI) {
+
+			# Basics
+			printf "%u BPM  Batt:%u%%  ",
+				$packet->{heart_rate},
+				$packet->{battery_charge};
+
+			# TODO: I want the average of the DELTA R-R, not of the R-R
+			# my $rr_avg = List::Util::sum(@last_intervals) / scalar(@last_intervals);
+
+			# Power Spectral Density
+			print "PSD:[";
+			if (scalar(@spectrum) > 0) {
+				foreach my $frequency (@spectrum) {
+					my ($band, $power) = @{ $frequency };
+					my $scaled = int(($power / List::Util::max(@spectrum_maxes)) * 8);
+					if ($band <= 0.04) {
+						print RED;
+					} elsif ($band <= 0.15) {
+						print YELLOW;
+					} else {
+						print GREEN;
+					}
+					if ($scaled == 0) {
+						print " ";
+					} else {
+						print chr(0x2580+$scaled);
+					}
+				}
+			} else {
+				print "Gathering...   ";
+			}
+			print WHITE, "]  ";
+
+			# Instantaneous BPM graphic
+			my $bpm = 60000/(List::Util::sum(@{ $packet->{new_beats} }) / scalar(@{ $packet->{new_beats} }));
+			print "[";
+			my $pos = round(30 * ((List::Util::max(List::Util::min($bpm,90),50) - 50) / 40));  #  50..90 becomes 0..30
+			for (my $i=0; $i < $pos; $i++) { print " "; }
+			print ".";
+			for (my $i=30; $i > $pos; $i--) { print " "; }
+			print "] ";
+
+			# Advanced stats
+			foreach (@{ $packet->{new_beats} }) {
+				printf "%5.1f ", 60000/$_;
+			}
+
+			print "\n";
+
+		}  # if $DO_GUI
+
+
+		## JSON OUTPUT
+
+		if ($client) {
+			$json_reply->{state}                   = 'Connected';
+			$json_reply->{source}{name}            = 'Zephyr ' . $packet->{device_name};
+			$json_reply->{source}{connection_type} = 'Bluetooth RFCOMM';
+			$json_reply->{source}{battery_charge}  = $packet->{battery_charge};
+			$json_reply->{heart_rate}              = $packet->{heart_rate};  # FIXME: Use our own average
+			$json_reply->{latest_beat_id}          = $beat_counter;
+			$json_reply->{period_history}          = @last_intervals;
+			$json_reply->{period_min}              = List::Util::min(@last_intervals);
+			$json_reply->{period_max}              = List::Util::max(@last_intervals);
+			$json_reply->{spectrum}                = [];
+			foreach my $frequency (@spectrum) {
+				my ($band, $power) = @{ $frequency };
+				# We ignore $band as GUI hard-codes 0.333 right now.
+				push @{ $json_reply->{spectrum} }, ($power / List::Util::max(@spectrum_maxes));
+			}
+		}
+
+	}
+	$client->send_response(HTTP::Response->new(
+		200,
+		'OK',
+		[
+			'Content-Type' => 'application/json; charset="UTF-8"'
+		],
+		encode_json($json_reply)
+	)) if $client;
+}
+print "Exiting.\n";
+$device->close();
+$client->close() if $client;
+
+
+## UTILITIES
+
+# Appends samples to @{ $samlpes } for $newperiod msec
+sub interpolate_period {
+	my ($samples, $rate, $new_period) = @_;
+
+	# Bootstrap
+	if (scalar(@{ $samples }) <= 0) {
+		push @{ $samples }, $new_period;
+		return;
+	}
+
+	# Interpolate
+	my $last_period = @{ $samples }[-1];
+	my $width = ($new_period/1000) * $rate;
+	my $step = ($new_period - $last_period) / $width;
+	for (my $i=0, my $new=$last_period+$step; $i < $width; $i++, $new=$new+$step) {
+			push @{ $samples }, $new;
+	}
+}
+
+# Interpolate new periods and keep samples cut to max length
+sub append_periods {
+	my ($samples, $rate, $max_duration, @newperiods) = @_;
+
+	# Append each new period in order
+	foreach (@newperiods) {
+		interpolate_period($samples, $rate, $_);
+	}
+
+	# Truncate samples older than needed
+	my $max_size = $max_duration * $rate;
+	if (scalar(@{ $samples}) > $max_size) {
+		splice @{ $samples}, 0, scalar(@{ $samples}) - $max_size;
+	}
+}
