@@ -42,7 +42,7 @@ use JSON;
 binmode STDOUT, ":utf8";
 
 use constant SPECTRUM_SCALE_LOOKBACK => 10;  # Use highest max of the last N to scale PSD
-use constant INTERVAL_HISTORY        => 60;  # Beats
+use constant INTERVAL_HISTORY        => 120; # Beats
 use constant INTERPOLATION_RATE      => 40;  # Hz, to minimize artifacts
 use constant RR_HISTORY_DURATION     => 30;  # Seconds, to get spectrum in 0.033 Hz resolution
 
@@ -76,7 +76,7 @@ my $httpd;
 if ($DO_GUI) {
 	$httpd = HTTP::Daemon->new(LocalAddr => $HTTP_HOST, LocalPort => $HTTP_PORT, ReuseAddr => 1)
 		or die "ERROR: Cannot create HTTP daemon: $@\n";
-	print "Started GUI at ". $httpd->url ."\n" if $DO_CLI;
+	print "Started GUI at ". $httpd->url ."\n";
 }
 
 my @last_intervals;
@@ -235,7 +235,7 @@ while ($running) {
 			$json_reply->{source}{battery_charge}  = $packet->{battery_charge};
 			$json_reply->{heart_rate}              = $packet->{heart_rate};  # FIXME: Use our own average
 			$json_reply->{latest_beat_id}          = $beat_counter;
-			$json_reply->{period_history}          = @last_intervals;
+			$json_reply->{period_history}          = \@last_intervals;
 			$json_reply->{period_min}              = List::Util::min(@last_intervals);
 			$json_reply->{period_max}              = List::Util::max(@last_intervals);
 			$json_reply->{spectrum}                = [];
