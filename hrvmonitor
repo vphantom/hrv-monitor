@@ -72,7 +72,11 @@ my $running = 1;
 $SIG{'INT'} = sub { $running = 0; };
 $SIG{'TERM'} = sub { $running = 0; };
 
+# Work around HTTP::Daemon dying when the browser goes away.
 my $httpd;
+my $client;
+my $client_request;
+$SIG{'PIPE'} = sub { $client = undef; };
 if ($DO_GUI) {
 	$httpd = HTTP::Daemon->new(LocalAddr => $HTTP_HOST, LocalPort => $HTTP_PORT, ReuseAddr => 1)
 		or die "ERROR: Cannot create HTTP daemon: $@\n";
@@ -83,8 +87,6 @@ my @last_intervals;
 my $waveform = [];
 my @spectrum_maxes;
 my $beat_counter = 0;
-my $client;
-my $client_request;
 while ($running) {
 
 	# Get next HTTP request(s)  (BLOCKING)
