@@ -2,7 +2,7 @@
 
 Cross-platform tool for monitoring real-time R-R measurements and analyzing variability and coherence aspects of heart rate over time.
 
-![![](doc/hrvmonitor-beta.png)](doc/hrvmonitor-beta-thumb.png)
+[![](doc/hrvmonitor-beta-thumb.png)](doc/hrvmonitor-beta.png)
 
 For more details, please see:
 
