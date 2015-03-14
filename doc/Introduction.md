@@ -22,4 +22,4 @@ I hope to build this tool up from there to be able to detect fluctuations in PSN
 
 ## Screenshots ##
 
-![![](http://wiki.hrv-monitor.googlecode.com/git/hrvmonitor-beta-thumb.png)](http://wiki.hrv-monitor.googlecode.com/git/hrvmonitor-beta.png)
+![![](hrvmonitor-beta.png)](hrvmonitor-beta-thumb.png)
