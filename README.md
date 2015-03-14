@@ -6,13 +6,13 @@ Cross-platform tool for monitoring real-time R-R measurements and analyzing vari
 
 For more details, please see:
 
-  * [Introduction](Introduction.md) What HRV Monitor is intended for, screenshots, etc.
-  * [Uses](Uses.md) What HRV Monitor could be useful for.
-  * [QuickStart](QuickStart.md) System requirements, how to launch the software.
+  * [Introduction](doc/Introduction.md) What HRV Monitor is intended for, screenshots, etc.
+  * [Uses](doc/Uses.md) What HRV Monitor could be useful for.
+  * [QuickStart](doc/QuickStart.md) System requirements, how to launch the software.
 
 For developers interested in my little ZephyrHxM.pm module:
 
-  * [ZephyrProtocol](ZephyrProtocol.md) Summary compiled from Zephyr's official documentation.
+  * [ZephyrProtocol](doc/ZephyrProtocol.md) Summary compiled from Zephyr's official documentation.
 
 **IMPORTANT NOTE:** This initial version of ZephyrHxM.pm is designed for Zephyr's 1st generation Bluetooth transmitters, which use a serial protocol.
 
